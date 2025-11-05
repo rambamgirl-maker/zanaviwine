@@ -1,0 +1,9 @@
+# Netlify redirects file for SPA routing
+/*    /index.html   200
+
+# Handle www subdomain
+https://www.zanaviveli.ge/* https://zanaviveli.ge/:splat 301!
+http://www.zanaviveli.ge/* https://zanaviveli.ge/:splat 301!
+
+# Force HTTPS
+http://zanaviveli.ge/* https://zanaviveli.ge/:splat 301!
