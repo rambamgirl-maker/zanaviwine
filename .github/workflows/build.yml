@@ -1,0 +1,36 @@
+name: Build Vite React (Dist Artifact)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+      - name: Build
+        env:
+          CI: false
+        run: npm run build
+      - name: Zip dist
+        run: |
+          cd dist
+          zip -r ../dist_artifact.zip .
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist_artifact
+          path: dist_artifact.zip
