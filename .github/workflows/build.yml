@@ -1,4 +1,4 @@
-name: Build Vite React (Auto-Detect)
+name: Build Vite React (Auto-Detect & Fallback)
 
 on:
   push:
@@ -8,29 +8,40 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect workdir (folder that has package.json)
+      - name: Detect workdir (prefer Vite config)
         id: detect
         shell: bash
         run: |
           set -e
-          PKG_DIR="$(git ls-files | grep -E '(^|/){1}package.json$' | head -n1 | xargs -I{} dirname {})"
-          if [ -z "$PKG_DIR" ]; then
-            echo "No package.json found in repo." >&2
-            exit 1
+          # Prefer the directory that has a vite config
+          VITE_DIR="$(git ls-files | grep -E '(^|/){1}vite\.config\.(ts|js|mjs|cjs)$' | head -n1 | xargs -I{} dirname {} || true)"
+          if [ -n "$VITE_DIR" ]; then
+            echo "Found vite config in: $VITE_DIR"
+            WORKDIR="$VITE_DIR"
+          else
+            # Fallback: first directory that has a package.json
+            PKG_DIR="$(git ls-files | grep -E '(^|/){1}package.json$' | head -n1 | xargs -I{} dirname {} || true)"
+            if [ -z "$PKG_DIR" ]; then
+              echo "No package.json found in repo." >&2
+              exit 1
+            fi
+            echo "No vite config found. Using first package.json in: $PKG_DIR"
+            WORKDIR="$PKG_DIR"
           fi
-          echo "Found package.json in: $PKG_DIR"
-          echo "WORKDIR=$PKG_DIR" >> $GITHUB_ENV
+          echo "WORKDIR=$WORKDIR" >> $GITHUB_ENV
+          echo "Using WORKDIR=$WORKDIR"
 
-      - name: Show structure for sanity
+      - name: Show structure (sanity check)
         run: |
           echo "Working dir: $WORKDIR"
-          ls -la "$WORKDIR"
+          ls -la "$WORKDIR" || true
           echo "Top-level files:"
-          ls -la
+          ls -la || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -39,22 +50,30 @@ jobs:
           cache: 'npm'
           cache-dependency-path: ${{ env.WORKDIR }}/package-lock.json
 
-      - name: Install deps
+      - name: Install dependencies
         working-directory: ${{ env.WORKDIR }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
-          else:
+          else
             npm install
           fi
 
-      - name: Build (Vite)
+      - name: Build (use script if present; else fallback to npx vite build)
         working-directory: ${{ env.WORKDIR }}
         env:
           CI: false
-        run: npm run build
+        run: |
+          set -e
+          if npm run | grep -qE '^  build'; then
+            echo "Running: npm run build"
+            npm run build
+          else
+            echo "No build script found. Trying: npx --yes vite@latest build"
+            npx --yes vite@latest build
+          fi
 
-      - name: Zip dist
+      - name: Ensure dist exists then zip it
         working-directory: ${{ env.WORKDIR }}
         run: |
           test -d dist || (echo "dist/ not found. Build likely failed." >&2; exit 1)
@@ -70,4 +89,5 @@ jobs:
       - name: Upload build logs on failure
         if: failure()
         run: |
+          echo "---- npm logs (if any) ----"
           find "$WORKDIR" -name "npm-*.log" -maxdepth 2 -print -exec cat {} \; || true
