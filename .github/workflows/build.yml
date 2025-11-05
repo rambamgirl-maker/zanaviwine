@@ -1,4 +1,4 @@
-name: Build Vite React (Dist Artifact)
+name: Build Vite React (Auto-Detect)
 
 on:
   push:
@@ -9,28 +9,65 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect workdir (folder that has package.json)
+        id: detect
+        shell: bash
+        run: |
+          set -e
+          PKG_DIR="$(git ls-files | grep -E '(^|/){1}package.json$' | head -n1 | xargs -I{} dirname {})"
+          if [ -z "$PKG_DIR" ]; then
+            echo "No package.json found in repo." >&2
+            exit 1
+          fi
+          echo "Found package.json in: $PKG_DIR"
+          echo "WORKDIR=$PKG_DIR" >> $GITHUB_ENV
+
+      - name: Show structure for sanity
+        run: |
+          echo "Working dir: $WORKDIR"
+          ls -la "$WORKDIR"
+          echo "Top-level files:"
+          ls -la
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: ${{ env.WORKDIR }}/package-lock.json
+
       - name: Install deps
+        working-directory: ${{ env.WORKDIR }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
-          else
+          else:
             npm install
           fi
-      - name: Build
+
+      - name: Build (Vite)
+        working-directory: ${{ env.WORKDIR }}
         env:
           CI: false
         run: npm run build
+
       - name: Zip dist
+        working-directory: ${{ env.WORKDIR }}
         run: |
+          test -d dist || (echo "dist/ not found. Build likely failed." >&2; exit 1)
           cd dist
           zip -r ../dist_artifact.zip .
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist_artifact
-          path: dist_artifact.zip
+          path: ${{ env.WORKDIR }}/dist_artifact.zip
+
+      - name: Upload build logs on failure
+        if: failure()
+        run: |
+          find "$WORKDIR" -name "npm-*.log" -maxdepth 2 -print -exec cat {} \; || true
